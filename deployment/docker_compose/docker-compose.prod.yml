@@ -74,6 +74,22 @@ services:
     restart: always
     env_file:
       - .env
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.api.rule=Host(`danswer.sellem.me`)
+      - traefik.http.routers.api.tls=true
+      - traefik.http.routers.api.entrypoints=web,websecure
+      - traefik.http.routers.api.tls.certresolver=mytlschallenge
+      - traefik.http.middlewares.api.headers.SSLRedirect=true
+      - traefik.http.middlewares.api.headers.STSSeconds=315360000
+      - traefik.http.middlewares.api.headers.browserXSSFilter=true
+      - traefik.http.middlewares.api.headers.contentTypeNosniff=true
+      - traefik.http.middlewares.api.headers.forceSTSHeader=true
+      - traefik.http.middlewares.api.headers.SSLHost='sellem.me'
+      - traefik.http.middlewares.api.headers.STSIncludeSubdomains=true
+      - traefik.http.middlewares.api.headers.STSPreload=true
+      - traefik.http.routers.api.middlewares=api@docker
+
     environment:
       - INTERNAL_URL=http://api_server:8080
     logging:
@@ -108,53 +124,6 @@ services:
       options:
         max-size: "50m"
         max-file: "6"
-  nginx:
-    image: nginx:1.23.4-alpine
-    restart: always
-    # nginx will immediately crash with `nginx: [emerg] host not found in upstream`
-    # if api_server / web_server are not up 
-    depends_on:
-      - api_server
-      - web_server
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ../data/nginx:/etc/nginx/conf.d
-      - ../data/certbot/conf:/etc/letsencrypt
-      - ../data/certbot/www:/var/www/certbot
-    # sleep a little bit to allow the web_server / api_server to start up. 
-    # Without this we've seen issues where nginx shows no error logs but 
-    # does not recieve any traffic
-    logging:
-      driver: json-file
-      options:
-        max-size: "50m"
-        max-file: "6"
-    # the specified script waits for the api_server to start up. 
-    # Without this we've seen issues where nginx shows no error logs but 
-    # does not recieve any traffic  
-    # NOTE: we have to use dos2unix to remove Carriage Return chars from the file
-    # in order to make this work on both Unix-like systems and windows
-    command: > 
-      /bin/sh -c "dos2unix /etc/nginx/conf.d/run-nginx.sh 
-      && /etc/nginx/conf.d/run-nginx.sh app.conf.template"
-    env_file:
-      - .env.nginx
-  # follows https://pentacent.medium.com/nginx-and-lets-encrypt-with-docker-in-less-than-5-minutes-b4b8a60d3a71
-  certbot:
-    image: certbot/certbot
-    restart: always
-    volumes:
-      - ../data/certbot/conf:/etc/letsencrypt
-      - ../data/certbot/www:/var/www/certbot
-    logging:
-      driver: json-file
-      options:
-        max-size: "50m"
-        max-file: "6"
-    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
-  # Run with --profile model-server to bring up the danswer-model-server container
   model_server:
     image: danswer/danswer-model-server:latest
     build:
@@ -178,6 +147,10 @@ services:
       options:
         max-size: "50m"
         max-file: "6"
+networks:
+  default:
+    name: traefik-network
+    external: true
 volumes:
   local_dynamic_storage:
   file_connector_tmp_storage:  # used to store files uploaded by the user temporarily while we are indexing them
